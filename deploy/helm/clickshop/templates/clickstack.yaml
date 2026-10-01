@@ -1,0 +1,223 @@
+{{- if ne .Values.clickstack.mode "none" }}
+{{- $ch := include "cs.chHost" . }}
+{{- $db := .Values.clickhouse.database }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: otel-collector-config
+  labels: {{- include "cs.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          http:
+            endpoint: 0.0.0.0:4318
+            cors:
+              allowed_origins: ["*"]
+              allowed_headers: ["*"]
+          grpc:
+            endpoint: 0.0.0.0:4317
+    processors:
+      memory_limiter:
+        limit_mib: 400
+        spike_limit_mib: 100
+        check_interval: 1s
+      batch:
+        timeout: 5s
+        send_batch_size: 2048
+      resource:
+        attributes:
+          - { key: service.namespace, value: clickshop, action: insert }
+          - { key: deployment.environment, value: {{ .Values.langfuse.environment | quote }}, action: insert }
+    connectors:
+      routing/logs:
+        default_pipelines: [logs/out-default]
+        error_mode: ignore
+        table:
+          - context: log
+            condition: instrumentation_scope.name == "rum.rr-web"
+            pipelines: [logs/out-rrweb]
+    exporters:
+    {{- if eq .Values.clickstack.mode "oss" }}
+      clickhouse:
+        endpoint: "tcp://{{ $ch }}:{{ include "cs.chNativePort" . }}{{ if eq (include "cs.chSecure" .) "true" }}?secure=true{{ end }}"
+        username: {{ include "cs.chUser" . | quote }}
+        password: "${env:CLICKHOUSE_PASSWORD}"
+        database: {{ $db }}
+        create_schema: false
+        logs_table_name: otel_logs
+        traces_table_name: otel_traces
+        metrics_table_name: otel_metrics
+        timeout: 30s
+        retry_on_failure: { enabled: true, initial_interval: 5s, max_interval: 30s, max_elapsed_time: 300s }
+      clickhouse/rrweb:
+        endpoint: "tcp://{{ $ch }}:{{ include "cs.chNativePort" . }}{{ if eq (include "cs.chSecure" .) "true" }}?secure=true{{ end }}"
+        username: {{ include "cs.chUser" . | quote }}
+        password: "${env:CLICKHOUSE_PASSWORD}"
+        database: {{ $db }}
+        create_schema: false
+        logs_table_name: hyperdx_sessions
+        timeout: 10s
+        retry_on_failure: { enabled: true, initial_interval: 5s, max_interval: 30s, max_elapsed_time: 300s }
+    {{- else }}
+      otlphttp/clickstack:
+        endpoint: {{ .Values.clickstack.otlpEndpoint | quote }}
+        headers:
+          authorization: "${env:CLICKSTACK_API_KEY}"
+        retry_on_failure: { enabled: true }
+    {{- end }}
+    {{- $out := ternary "[clickhouse]" "[otlphttp/clickstack]" (eq .Values.clickstack.mode "oss") }}
+    {{- $rr := ternary "[clickhouse/rrweb]" "[otlphttp/clickstack]" (eq .Values.clickstack.mode "oss") }}
+    extensions:
+      health_check:
+        endpoint: 0.0.0.0:13133
+    service:
+      extensions: [health_check]
+      telemetry:
+        logs: { level: warn }
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: {{ $out }}
+        metrics:
+          receivers: [otlp]
+          processors: [memory_limiter, resource, batch]
+          exporters: {{ $out }}
+        logs/in:
+          receivers: [otlp]
+          processors: [memory_limiter]
+          exporters: [routing/logs]
+        logs/out-default:
+          receivers: [routing/logs]
+          processors: [resource, batch]
+          exporters: {{ $out }}
+        logs/out-rrweb:
+          receivers: [routing/logs]
+          processors: [batch]
+          exporters: {{ $rr }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: otel-collector
+  labels: {{- include "cs.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "cs.selector" "otel-collector" | nindent 4 }}
+  ports:
+    - { name: otlp-http, port: 4318, targetPort: 4318 }
+    - { name: otlp-grpc, port: 4317, targetPort: 4317 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: otel-collector
+  labels: {{- include "cs.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "cs.selector" "otel-collector" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "cs.selector" "otel-collector" | nindent 8 }}
+      annotations:
+        checksum/config: {{ .Values.clickstack | toJson | sha256sum | trunc 12 }}
+    spec:
+      containers:
+        - name: otel-collector
+          image: {{ .Values.images.otelCollector }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args: ["--config=/conf/config.yaml"]
+          env:
+            {{- if eq .Values.clickstack.mode "oss" }}
+            - name: CLICKHOUSE_PASSWORD
+              {{- include "cs.secretRef" (dict "root" . "key" "clickhouse-password") | nindent 14 }}
+            {{- else }}
+            - name: CLICKSTACK_API_KEY
+              {{- include "cs.secretRef" (dict "root" . "key" "clickstack-api-key") | nindent 14 }}
+            {{- end }}
+          ports:
+            - { containerPort: 4318, name: otlp-http }
+            - { containerPort: 4317, name: otlp-grpc }
+          readinessProbe:
+            httpGet: { path: /, port: 13133 }
+            periodSeconds: 10
+          resources: {{- toYaml .Values.resources.otelCollector | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /conf }
+      volumes:
+        - name: config
+          configMap: { name: otel-collector-config }
+{{- end }}
+{{- if eq .Values.clickstack.mode "oss" }}
+{{- $chUrl := printf "%s://%s:%s" (ternary "https" "http" (eq (include "cs.chSecure" .) "true")) (include "cs.chHost" .) (include "cs.chHttpPort" .) }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hyperdx-config
+  labels: {{- include "cs.labels" . | nindent 4 }}
+data:
+  sources.json: |
+    {{- (tpl (.Files.Get "files/hyperdx-sources.json") .) | nindent 4 }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hyperdx
+  labels: {{- include "cs.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "cs.selector" "hyperdx" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "cs.selector" "hyperdx" | nindent 8 }}
+    spec:
+      initContainers:
+        {{- include "cs.waitFor" (dict "root" . "name" "mongodb" "host" "mongodb" "port" 27017) | nindent 8 }}
+      containers:
+        - name: hyperdx
+          image: {{ .Values.images.hyperdx }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          env:
+            - { name: APP_PORT, value: "3000" }
+            - { name: API_PORT, value: "8000" }
+            - { name: HYPERDX_APP_PORT, value: "3000" }
+            - { name: HYPERDX_API_PORT, value: "8000" }
+            - name: FRONTEND_URL
+              value: {{ include "cs.publicUrl" (dict "root" . "name" "hyperdx" "port" .Values.gateway.ports.hyperdx) | default "http://localhost:3000" | quote }}
+            - { name: MONGO_URI, value: "mongodb://mongodb:27017/hyperdx" }
+            - { name: USAGE_STATS_ENABLED, value: "false" }
+            - { name: HYPERDX_LOG_LEVEL, value: warn }
+            - { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://otel-collector:4318" }
+            - { name: OTEL_SERVICE_NAME, value: clickstack-hyperdx }
+            - name: CLICKHOUSE_PASSWORD
+              {{- include "cs.secretRef" (dict "root" . "key" "clickhouse-password") | nindent 14 }}
+            - name: DEFAULT_CONNECTIONS
+              value: '[{"name":"ClickShop ClickHouse","host":"{{ $chUrl }}","port":{{ include "cs.chHttpPort" . }},"username":"{{ include "cs.chUser" . }}","password":"$(CLICKHOUSE_PASSWORD)"}]'
+            - name: DEFAULT_SOURCES
+              valueFrom:
+                configMapKeyRef: { name: hyperdx-config, key: sources.json }
+          ports:
+            - { containerPort: 3000, name: app }
+            - { containerPort: 8000, name: api }
+          readinessProbe:
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 10
+          resources: {{- toYaml .Values.resources.hyperdx | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: hyperdx
+  labels: {{- include "cs.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "cs.selector" "hyperdx" | nindent 4 }}
+  ports:
+    - { name: app, port: 3000, targetPort: 3000 }
+    - { name: api, port: 8000, targetPort: 8000 }
+{{- end }}

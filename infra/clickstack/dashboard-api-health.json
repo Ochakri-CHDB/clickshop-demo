@@ -1,0 +1,266 @@
+{
+  "version": "0.1.0",
+  "name": "ClickShop - API Health",
+  "description": "Request rate, latency percentiles per route, and error rate for the ClickShop API (clickshop-api on Vercel). Import into ClickStack and map tiles to the Traces source.",
+  "tiles": [
+    {
+      "id": "api-req-count",
+      "x": 0,
+      "y": 0,
+      "w": 6,
+      "h": 5,
+      "config": {
+        "name": "API requests (range)",
+        "source": "Traces",
+        "displayType": "number",
+        "select": [
+          {
+            "aggFn": "count",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": ""
+          }
+        ],
+        "where": "ServiceName:\"clickshop-api\" AND SpanKind:\"Server\"",
+        "whereLanguage": "lucene",
+        "numberFormat": { "output": "number", "mantissa": 0, "thousandSeparated": true }
+      }
+    },
+    {
+      "id": "api-error-count",
+      "x": 6,
+      "y": 0,
+      "w": 6,
+      "h": 5,
+      "config": {
+        "name": "Error spans (range)",
+        "source": "Traces",
+        "displayType": "number",
+        "select": [
+          {
+            "aggFn": "count",
+            "aggCondition": "StatusCode:\"Error\"",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": ""
+          }
+        ],
+        "where": "ServiceName:\"clickshop-api\"",
+        "whereLanguage": "lucene",
+        "numberFormat": { "output": "number", "mantissa": 0 },
+        "color": "chart-success",
+        "colorRules": [
+          { "operator": "gte", "value": 1, "color": "chart-warning", "label": "errors present" },
+          { "operator": "gte", "value": 50, "color": "chart-error", "label": "error spike" }
+        ]
+      }
+    },
+    {
+      "id": "api-p95-number",
+      "x": 12,
+      "y": 0,
+      "w": 6,
+      "h": 5,
+      "config": {
+        "name": "p95 latency (ms)",
+        "source": "Traces",
+        "displayType": "number",
+        "select": [
+          {
+            "aggFn": "quantile",
+            "level": 0.95,
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Duration/1e6"
+          }
+        ],
+        "where": "ServiceName:\"clickshop-api\" AND SpanKind:\"Server\"",
+        "whereLanguage": "lucene",
+        "numberFormat": { "output": "number", "mantissa": 0, "unit": "ms" },
+        "color": "chart-success",
+        "colorRules": [
+          { "operator": "between", "value": [1000, 2000], "color": "chart-warning", "label": "degraded" },
+          { "operator": "gt", "value": 2000, "color": "chart-error", "label": "SLO breach" }
+        ]
+      }
+    },
+    {
+      "id": "api-p99-number",
+      "x": 18,
+      "y": 0,
+      "w": 6,
+      "h": 5,
+      "config": {
+        "name": "p99 latency (ms)",
+        "source": "Traces",
+        "displayType": "number",
+        "select": [
+          {
+            "aggFn": "quantile",
+            "level": 0.99,
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Duration/1e6"
+          }
+        ],
+        "where": "ServiceName:\"clickshop-api\" AND SpanKind:\"Server\"",
+        "whereLanguage": "lucene",
+        "numberFormat": { "output": "number", "mantissa": 0, "unit": "ms" }
+      }
+    },
+    {
+      "id": "api-rpm-by-route",
+      "x": 0,
+      "y": 5,
+      "w": 12,
+      "h": 8,
+      "config": {
+        "name": "Request throughput by route",
+        "source": "Traces",
+        "displayType": "stacked_bar",
+        "select": [
+          {
+            "aggFn": "count",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": ""
+          }
+        ],
+        "where": "ServiceName:\"clickshop-api\" AND SpanKind:\"Server\"",
+        "whereLanguage": "lucene",
+        "groupBy": "SpanName",
+        "granularity": "auto",
+        "seriesLimit": 10
+      }
+    },
+    {
+      "id": "api-latency-percentiles",
+      "x": 12,
+      "y": 5,
+      "w": 12,
+      "h": 8,
+      "config": {
+        "name": "Latency p50 / p95 / p99 (ms)",
+        "source": "Traces",
+        "displayType": "line",
+        "select": [
+          {
+            "aggFn": "quantile",
+            "level": 0.5,
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Duration/1e6",
+            "alias": "p50"
+          },
+          {
+            "aggFn": "quantile",
+            "level": 0.95,
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Duration/1e6",
+            "alias": "p95"
+          },
+          {
+            "aggFn": "quantile",
+            "level": 0.99,
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Duration/1e6",
+            "alias": "p99"
+          }
+        ],
+        "where": "ServiceName:\"clickshop-api\" AND SpanKind:\"Server\"",
+        "whereLanguage": "lucene",
+        "granularity": "auto",
+        "fitYAxisToData": true
+      }
+    },
+    {
+      "id": "api-error-rate",
+      "x": 0,
+      "y": 13,
+      "w": 12,
+      "h": 8,
+      "config": {
+        "name": "Error rate (errors / total)",
+        "source": "Traces",
+        "displayType": "line",
+        "seriesReturnType": "ratio",
+        "select": [
+          {
+            "aggFn": "count",
+            "aggCondition": "StatusCode:\"Error\"",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "",
+            "alias": "errors"
+          },
+          {
+            "aggFn": "count",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "",
+            "alias": "total"
+          }
+        ],
+        "where": "ServiceName:\"clickshop-api\"",
+        "whereLanguage": "lucene",
+        "granularity": "auto",
+        "numberFormat": { "output": "percent", "mantissa": 2 }
+      }
+    },
+    {
+      "id": "api-routes-table",
+      "x": 12,
+      "y": 13,
+      "w": 12,
+      "h": 8,
+      "config": {
+        "name": "Routes: volume, p95 (ms), errors",
+        "source": "Traces",
+        "displayType": "table",
+        "select": [
+          {
+            "aggFn": "count",
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "",
+            "alias": "requests"
+          },
+          {
+            "aggFn": "quantile",
+            "level": 0.95,
+            "aggCondition": "",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "Duration/1e6",
+            "alias": "p95_ms"
+          },
+          {
+            "aggFn": "count",
+            "aggCondition": "StatusCode:\"Error\"",
+            "aggConditionLanguage": "lucene",
+            "valueExpression": "",
+            "alias": "errors"
+          }
+        ],
+        "where": "ServiceName:\"clickshop-api\" AND SpanKind:\"Server\"",
+        "whereLanguage": "lucene",
+        "groupBy": "SpanName",
+        "limit": { "limit": 20 }
+      }
+    },
+    {
+      "id": "api-recent-errors",
+      "x": 0,
+      "y": 21,
+      "w": 24,
+      "h": 8,
+      "config": {
+        "name": "Recent error spans",
+        "source": "Traces",
+        "displayType": "search",
+        "select": "Timestamp, ServiceName, SpanName, round(Duration/1e6) AS ms, StatusMessage",
+        "where": "StatusCode:\"Error\"",
+        "whereLanguage": "lucene"
+      }
+    }
+  ]
+}

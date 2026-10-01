@@ -1,0 +1,78 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Dark theme (default) ── */
+:root,
+.dark {
+  --bg: #0C0D0E;
+  --bg-end: #161517;
+  --fg: #e4e4e7;
+  --surface: rgba(24,24,27,0.8);
+  --surface-solid: #18181b;
+  --surface-hover: #27272a;
+  --border: #27272a;
+  --border-subtle: rgba(39,39,42,0.6);
+  --muted: #71717a;
+  --muted-fg: #a1a1aa;
+  --brand: #FAFF69;
+  --brand-dim: rgba(250,255,105,0.1);
+  --brand-badge-bg: rgba(250,255,105,0.1);
+  --card-shadow: rgba(0,0,0,0.25);
+}
+
+/* ── Light theme ── */
+.light {
+  --bg: #f8f8f8;
+  --bg-end: #f0f0f2;
+  --fg: #18181b;
+  --surface: #ffffff;
+  --surface-solid: #ffffff;
+  --surface-hover: #f4f4f5;
+  --border: #e4e4e7;
+  --border-subtle: rgba(228,228,231,0.6);
+  --muted: #71717a;
+  --muted-fg: #52525b;
+  --brand: #5c5d0e;
+  --brand-dim: rgba(92,93,14,0.08);
+  --brand-badge-bg: rgba(92,93,14,0.1);
+  --card-shadow: rgba(0,0,0,0.06);
+}
+
+body {
+  background: linear-gradient(135deg, var(--bg), var(--bg-end));
+  min-height: 100vh;
+}
+
+@layer utilities {
+  .gradient-brand {
+    @apply bg-gradient-to-r from-brand-400 to-brand-500;
+  }
+  .text-brand-glow {
+    text-shadow: 0 0 20px rgba(250, 255, 105, 0.3);
+  }
+}
+
+::selection {
+  background-color: rgba(250, 255, 105, 0.25);
+  color: #fafafa;
+}
+.light ::selection {
+  background-color: rgba(184, 187, 47, 0.2);
+  color: #18181b;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: var(--surface-solid);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--muted);
+}

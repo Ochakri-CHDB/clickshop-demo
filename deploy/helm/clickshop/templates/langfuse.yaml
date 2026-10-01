@@ -1,0 +1,123 @@
+{{- if eq .Values.langfuse.mode "oss" }}
+{{- $ch := include "cs.chHost" . }}
+{{- $secure := include "cs.chSecure" . }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: langfuse-env
+  labels: {{- include "cs.labels" . | nindent 4 }}
+data:
+  NEXTAUTH_URL: {{ include "cs.publicUrl" (dict "root" . "name" "langfuse" "port" .Values.gateway.ports.langfuse) | default "http://localhost:3000" | quote }}
+  HOSTNAME: "0.0.0.0"
+  TELEMETRY_ENABLED: "false"
+  LANGFUSE_ENABLE_EXPERIMENTAL_FEATURES: "true"
+  CLICKHOUSE_URL: "{{ if eq $secure "true" }}https{{ else }}http{{ end }}://{{ $ch }}:{{ include "cs.chHttpPort" . }}"
+  CLICKHOUSE_MIGRATION_URL: "clickhouse://{{ $ch }}:{{ include "cs.chNativePort" . }}{{ if eq $secure "true" }}?secure=true{{ end }}"
+  CLICKHOUSE_USER: {{ include "cs.chUser" . | quote }}
+  CLICKHOUSE_DB: langfuse
+  CLICKHOUSE_CLUSTER_ENABLED: "false"
+  REDIS_HOST: valkey
+  REDIS_PORT: "6379"
+  LANGFUSE_S3_EVENT_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_EVENT_UPLOAD_REGION: us-east-1
+  LANGFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: clickshop
+  LANGFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://minio:9000
+  LANGFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+  LANGFUSE_S3_MEDIA_UPLOAD_BUCKET: langfuse
+  LANGFUSE_S3_MEDIA_UPLOAD_REGION: us-east-1
+  LANGFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: clickshop
+  LANGFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://minio:9000
+  LANGFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+  LANGFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+  LANGFUSE_INIT_ORG_ID: clickshop
+  LANGFUSE_INIT_ORG_NAME: ClickShop
+  LANGFUSE_INIT_PROJECT_ID: clickshop
+  LANGFUSE_INIT_PROJECT_NAME: ClickShop
+  LANGFUSE_INIT_USER_EMAIL: {{ include "cs.adminEmail" . | quote }}
+  LANGFUSE_INIT_USER_NAME: Admin
+  AUTH_DISABLE_SIGNUP: "true"
+  # LibreChat reaches the Langfuse MCP endpoint in-cluster, not via NEXTAUTH_URL.
+  LANGFUSE_MCP_ALLOWED_HOSTS: "langfuse-web,langfuse-web:3000"
+{{- range $component := list "web" "worker" }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: langfuse-{{ $component }}
+  labels: {{- include "cs.labels" $ | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "cs.selector" (printf "langfuse-%s" $component) | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "cs.selector" (printf "langfuse-%s" $component) | nindent 8 }}
+    spec:
+      initContainers:
+        {{- include "cs.waitFor" (dict "root" $ "name" "postgres" "host" "postgres" "port" 5432) | nindent 8 }}
+        {{- include "cs.waitFor" (dict "root" $ "name" "valkey" "host" "valkey" "port" 6379) | nindent 8 }}
+        {{- include "cs.waitFor" (dict "root" $ "name" "minio" "host" "minio" "port" 9000) | nindent 8 }}
+        {{- if eq $.Values.clickhouse.mode "oss" }}
+        {{- include "cs.waitFor" (dict "root" $ "name" "clickhouse" "host" "clickhouse" "port" 9000) | nindent 8 }}
+        {{- end }}
+      containers:
+        - name: langfuse
+          image: {{ if eq $component "web" }}{{ $.Values.images.langfuseWeb }}{{ else }}{{ $.Values.images.langfuseWorker }}{{ end }}
+          imagePullPolicy: {{ $.Values.imagePullPolicy }}
+          envFrom:
+            - configMapRef: { name: langfuse-env }
+          env:
+            - name: PG_PASSWORD
+              {{- include "cs.secretRef" (dict "root" $ "key" "postgres-password") | nindent 14 }}
+            - name: DATABASE_URL
+              value: postgresql://postgres:$(PG_PASSWORD)@postgres:5432/langfuse
+            - name: CLICKHOUSE_PASSWORD
+              {{- include "cs.secretRef" (dict "root" $ "key" "clickhouse-password") | nindent 14 }}
+            - name: REDIS_AUTH
+              {{- include "cs.secretRef" (dict "root" $ "key" "valkey-password") | nindent 14 }}
+            - name: LANGFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY
+              {{- include "cs.secretRef" (dict "root" $ "key" "minio-password") | nindent 14 }}
+            - name: LANGFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY
+              {{- include "cs.secretRef" (dict "root" $ "key" "minio-password") | nindent 14 }}
+            - name: NEXTAUTH_SECRET
+              {{- include "cs.secretRef" (dict "root" $ "key" "auth-secret") | nindent 14 }}
+            - name: SALT
+              {{- include "cs.secretRef" (dict "root" $ "key" "langfuse-salt") | nindent 14 }}
+            - name: ENCRYPTION_KEY
+              {{- include "cs.secretRef" (dict "root" $ "key" "langfuse-encryption-key") | nindent 14 }}
+            - name: LANGFUSE_INIT_PROJECT_PUBLIC_KEY
+              {{- include "cs.secretRef" (dict "root" $ "key" "langfuse-public-key") | nindent 14 }}
+            - name: LANGFUSE_INIT_PROJECT_SECRET_KEY
+              {{- include "cs.secretRef" (dict "root" $ "key" "langfuse-secret-key") | nindent 14 }}
+            - name: LANGFUSE_INIT_USER_PASSWORD
+              {{- include "cs.secretRef" (dict "root" $ "key" "demo-password") | nindent 14 }}
+          {{- if eq $component "web" }}
+          ports:
+            - { containerPort: 3000, name: http }
+          readinessProbe:
+            httpGet: { path: /api/public/health, port: 3000 }
+            periodSeconds: 10
+            failureThreshold: 30
+          {{- else }}
+          ports:
+            - { containerPort: 3030, name: http }
+          readinessProbe:
+            httpGet: { path: /api/health, port: 3030 }
+            periodSeconds: 10
+            failureThreshold: 30
+          {{- end }}
+          resources: {{- toYaml $.Values.langfuse.resources | nindent 12 }}
+{{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: langfuse-web
+  labels: {{- include "cs.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "cs.selector" "langfuse-web" | nindent 4 }}
+  ports:
+    - { name: http, port: 3000, targetPort: 3000 }
+{{- end }}

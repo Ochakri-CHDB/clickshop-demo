@@ -1,0 +1,152 @@
+# MongoDB (LibreChat + HyperDX), Valkey (Langfuse queue) and MinIO (PeerDB
+# staging + Langfuse events). All ClusterIP only.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  labels: {{- include "cs.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "cs.selector" "mongodb" | nindent 4 }}
+  ports:
+    - { name: mongo, port: 27017, targetPort: 27017 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: mongodb
+  labels: {{- include "cs.labels" . | nindent 4 }}
+spec:
+  serviceName: mongodb
+  replicas: 1
+  selector:
+    matchLabels: {{- include "cs.selector" "mongodb" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "cs.selector" "mongodb" | nindent 8 }}
+    spec:
+      containers:
+        - name: mongodb
+          image: {{ .Values.images.mongo }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args: ["--bind_ip_all", "--wiredTigerCacheSizeGB", "0.25"]
+          ports:
+            - { containerPort: 27017, name: mongo }
+          readinessProbe:
+            tcpSocket: { port: 27017 }
+            periodSeconds: 5
+          resources: {{- toYaml .Values.resources.mongo | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /data/db }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- include "cs.storageClass" . | nindent 8 }}
+        resources:
+          requests:
+            storage: 10Gi
+{{- if eq .Values.langfuse.mode "oss" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey
+  labels: {{- include "cs.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "cs.selector" "valkey" | nindent 4 }}
+  ports:
+    - { name: redis, port: 6379, targetPort: 6379 }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+  labels: {{- include "cs.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "cs.selector" "valkey" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "cs.selector" "valkey" | nindent 8 }}
+    spec:
+      containers:
+        - name: valkey
+          image: {{ .Values.images.valkey }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command: ["sh", "-c", "exec valkey-server --requirepass \"$VALKEY_PASSWORD\" --maxmemory-policy noeviction --save ''"]
+          env:
+            - name: VALKEY_PASSWORD
+              {{- include "cs.secretRef" (dict "root" . "key" "valkey-password") | nindent 14 }}
+          ports:
+            - { containerPort: 6379, name: redis }
+          readinessProbe:
+            tcpSocket: { port: 6379 }
+            periodSeconds: 5
+          resources: {{- toYaml .Values.resources.valkey | nindent 12 }}
+{{- end }}
+{{- if eq (include "cs.minioEnabled" .) "true" }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  labels: {{- include "cs.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "cs.selector" "minio" | nindent 4 }}
+  ports:
+    - { name: s3, port: 9000, targetPort: 9000 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: minio
+  labels: {{- include "cs.labels" . | nindent 4 }}
+spec:
+  serviceName: minio
+  replicas: 1
+  selector:
+    matchLabels: {{- include "cs.selector" "minio" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "cs.selector" "minio" | nindent 8 }}
+    spec:
+      containers:
+        - name: minio
+          image: {{ .Values.images.minio }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          command:
+            - /bin/sh
+            - -c
+            - |
+              silo server /data &
+              until mc alias set local http://127.0.0.1:9000 "$MINIO_ROOT_USER" "$MINIO_ROOT_PASSWORD" >/dev/null 2>&1; do sleep 1; done
+              mc mb --ignore-existing local/peerdb local/langfuse
+              wait
+          env:
+            - name: MINIO_ROOT_USER
+              value: clickshop
+            - name: MINIO_ROOT_PASSWORD
+              {{- include "cs.secretRef" (dict "root" . "key" "minio-password") | nindent 14 }}
+          ports:
+            - { containerPort: 9000, name: s3 }
+          readinessProbe:
+            tcpSocket: { port: 9000 }
+            periodSeconds: 5
+          resources: {{- toYaml .Values.resources.minio | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /data }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- include "cs.storageClass" . | nindent 8 }}
+        resources:
+          requests:
+            storage: 10Gi
+{{- end }}

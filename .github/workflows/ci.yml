@@ -1,0 +1,42 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  chart:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+        with:
+          version: v4.3.0
+      - name: Lint and render the main setups
+        run: |
+          c=deploy/helm/clickshop
+          r=(--set "gateway.sourceRanges[0]=203.0.113.10/32")
+          helm lint "$c" "${r[@]}"
+          helm template t "$c" "${r[@]}" > /dev/null
+          helm template t "$c" "${r[@]}" --set llm.hasAnthropicKey=true > /dev/null
+          helm template t "$c" "${r[@]}" --set clickhouse.mode=cloud --set clickhouse.host=x.clickhouse.cloud \
+            --set langfuse.mode=cloud --set langfuse.baseUrl=https://cloud.langfuse.com \
+            --set cdc.staging.type=s3 --set cdc.staging.bucket=b --set cdc.staging.region=eu-west-1 > /dev/null
+          if helm template t "$c" > /dev/null 2>&1; then echo "chart must refuse to render without sourceRanges"; exit 1; fi
+      - name: shellcheck
+        run: shellcheck -S warning install.sh deploy/helm/clickshop/files/scripts/*.sh
+
+  web:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22.23.3
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npx tsc --noEmit -p apps/web

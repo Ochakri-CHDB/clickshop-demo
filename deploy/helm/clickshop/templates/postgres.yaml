@@ -1,0 +1,81 @@
+{{- if eq (include "cs.postgresEnabled" .) "true" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-initdb
+  labels: {{- include "cs.labels" . | nindent 4 }}
+data:
+  00-databases.sql: |
+    CREATE DATABASE clickshop;
+    CREATE DATABASE langfuse;
+    CREATE DATABASE peerdb;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  labels: {{- include "cs.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "cs.selector" "postgres" | nindent 4 }}
+  ports:
+    - { name: pg, port: 5432, targetPort: 5432 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  labels: {{- include "cs.labels" . | nindent 4 }}
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: {{- include "cs.selector" "postgres" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "cs.selector" "postgres" | nindent 8 }}
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.images.postgres }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          args:
+            - -c
+            - wal_level=logical
+            - -c
+            - max_replication_slots=10
+            - -c
+            - max_wal_senders=10
+            - -c
+            - max_connections=300
+            - -c
+            - shared_buffers=256MB
+          env:
+            - name: POSTGRES_USER
+              value: postgres
+            - name: POSTGRES_PASSWORD
+              {{- include "cs.secretRef" (dict "root" . "key" "postgres-password") | nindent 14 }}
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - { containerPort: 5432, name: pg }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", "postgres"] }
+            periodSeconds: 5
+          resources: {{- toYaml .Values.postgres.resources | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: initdb, mountPath: /docker-entrypoint-initdb.d }
+      volumes:
+        - name: initdb
+          configMap: { name: postgres-initdb }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- include "cs.storageClass" . | nindent 8 }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.persistence }}
+{{- end }}

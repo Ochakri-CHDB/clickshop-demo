@@ -1,0 +1,141 @@
+{{- if .Values.gateway.enabled }}
+{{- if not .Values.gateway.sourceRanges }}
+{{- fail "gateway.sourceRanges is required (for example [\"203.0.113.10/32\"]). The demo must not be open to the internet." }}
+{{- end }}
+{{- range .Values.gateway.sourceRanges }}
+{{- if or (eq . "0.0.0.0/0") (eq . "::/0") }}
+{{- fail "gateway.sourceRanges must not contain 0.0.0.0/0 or ::/0" }}
+{{- end }}
+{{- end }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: gateway-config
+  labels: {{- include "cs.labels" . | nindent 4 }}
+data:
+  default.conf: |
+    map $http_upgrade $connection_upgrade { default upgrade; '' close; }
+    proxy_http_version 1.1;
+    proxy_set_header Host $http_host;
+    proxy_set_header X-Real-IP $remote_addr;
+    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+    proxy_set_header Upgrade $http_upgrade;
+    proxy_set_header Connection $connection_upgrade;
+    proxy_read_timeout 600s;
+    proxy_buffering off;
+    client_max_body_size 50m;
+    resolver kube-dns.kube-system.svc.cluster.local valid=10s;
+
+    server {
+      listen {{ .Values.gateway.ports.app }};
+      location / { set $u http://web.{{ .Release.Namespace }}.svc.cluster.local:4242; proxy_pass $u; }
+    }
+    {{- if eq .Values.langfuse.mode "oss" }}
+    server {
+      listen {{ .Values.gateway.ports.langfuse }};
+      location / { set $u http://langfuse-web.{{ .Release.Namespace }}.svc.cluster.local:3000; proxy_pass $u; }
+    }
+    {{- end }}
+    {{- if eq .Values.clickstack.mode "oss" }}
+    server {
+      listen {{ .Values.gateway.ports.hyperdx }};
+      location / { set $u http://hyperdx.{{ .Release.Namespace }}.svc.cluster.local:3000; proxy_pass $u; }
+    }
+    {{- end }}
+    {{- if eq .Values.cdc.mode "peerdb" }}
+    server {
+      listen {{ .Values.gateway.ports.peerdb }};
+      location / { set $u http://peerdb-ui.{{ .Release.Namespace }}.svc.cluster.local:3000; proxy_pass $u; }
+    }
+    {{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  labels: {{- include "cs.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "cs.selector" "gateway" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "cs.selector" "gateway" | nindent 8 }}
+      annotations:
+        checksum/config: {{ printf "%s%s%s%s" .Values.langfuse.mode .Values.clickstack.mode .Values.cdc.mode (toJson .Values.gateway.ports) | sha256sum | trunc 12 }}
+    spec:
+      containers:
+        - name: nginx
+          image: {{ .Values.images.nginx }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          ports:
+            - { containerPort: {{ .Values.gateway.ports.app }}, name: app }
+          resources:
+            requests: { cpu: 50m, memory: 32Mi }
+            limits: { memory: 128Mi }
+          volumeMounts:
+            - { name: config, mountPath: /etc/nginx/conf.d }
+      volumes:
+        - name: config
+          configMap: { name: gateway-config }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  labels: {{- include "cs.labels" . | nindent 4 }}
+  {{- with .Values.gateway.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.gateway.serviceType }}
+  {{- if eq .Values.gateway.serviceType "LoadBalancer" }}
+  loadBalancerSourceRanges: {{- toYaml .Values.gateway.sourceRanges | nindent 4 }}
+  {{- end }}
+  selector: {{- include "cs.selector" "gateway" | nindent 4 }}
+  ports:
+    - { name: app, port: {{ .Values.gateway.ports.app }}, targetPort: {{ .Values.gateway.ports.app }} }
+    {{- if eq .Values.langfuse.mode "oss" }}
+    - { name: langfuse, port: {{ .Values.gateway.ports.langfuse }}, targetPort: {{ .Values.gateway.ports.langfuse }} }
+    {{- end }}
+    {{- if eq .Values.clickstack.mode "oss" }}
+    - { name: hyperdx, port: {{ .Values.gateway.ports.hyperdx }}, targetPort: {{ .Values.gateway.ports.hyperdx }} }
+    {{- end }}
+    {{- if eq .Values.cdc.mode "peerdb" }}
+    - { name: peerdb, port: {{ .Values.gateway.ports.peerdb }}, targetPort: {{ .Values.gateway.ports.peerdb }} }
+    {{- end }}
+{{- end }}
+{{- if .Values.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: clickshop
+  labels: {{- include "cs.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- $svc := dict "app" (list "web" 4242) "langfuse" (list "langfuse-web" 3000) "hyperdx" (list "hyperdx" 3000) }}
+    {{- range $name, $host := .Values.ingress.hosts }}
+    {{- if $host }}
+    - host: {{ $host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ index (index $svc $name) 0 }}
+                port: { number: {{ index (index $svc $name) 1 }} }
+    {{- end }}
+    {{- end }}
+{{- end }}

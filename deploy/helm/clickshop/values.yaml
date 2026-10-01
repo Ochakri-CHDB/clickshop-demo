@@ -1,0 +1,208 @@
+# ClickShop umbrella chart. Every component is "oss" (runs in the cluster)
+# or "cloud" (you provide the endpoint and credentials). install.sh writes a
+# values.local.yaml with your choices; secrets go into Kubernetes Secrets.
+
+# Hostname or IP of the gateway LoadBalancer (filled by install.sh after the
+# first install). Used for Langfuse and HyperDX redirect URLs.
+publicHost: ""
+
+# Password of the demo accounts (web app, LibreChat personas, Langfuse and
+# HyperDX admin in OSS mode). Required.
+demoPassword: ""
+demoEmailDomain: clickshop.io
+
+auth:
+  # Local admin account; empty = admin@<demoEmailDomain>.
+  adminEmail: ""
+  # Optional: any address of this domain can sign in with the demo password.
+  # Empty (default) = only the admin and the 5 persona accounts.
+  allowedEmailDomain: ""
+
+# Name of the Secret holding generated credentials (created by install.sh).
+secretName: clickshop-secrets
+
+imagePullPolicy: IfNotPresent
+
+images:
+  # The two ClickShop images are published by the release workflow as
+  # <registry>/clickshop-web:<tag> and <registry>/clickshop-librechat:<tag>.
+  registry: ghcr.io/ochakri-chdb
+  tag: ""        # empty = Chart appVersion
+  # Full image references, override registry/tag (e.g. a private mirror).
+  web: ""
+  librechat: ""
+  clickhouse: clickhouse/clickhouse-server:26.9.6.6
+  postgres: postgres:18.6
+  mongo: mongo:8.0.32
+  valkey: valkey/valkey:9.1.2-alpine
+  minio: pgsty/silo:RELEASE.2026-09-16T00-00-00Z
+  ollama: ollama/ollama:0.35.0
+  langfuseWeb: langfuse/langfuse:4.48.0
+  langfuseWorker: langfuse/langfuse-worker:4.48.0
+  hyperdx: docker.hyperdx.io/hyperdx/hyperdx:2.39.1
+  otelCollector: otel/opentelemetry-collector-contrib:0.161.0
+  peerdbTag: stable-v0.37.10
+  temporal: temporalio/auto-setup:1.29.7
+  temporalAdmin: temporalio/admin-tools:1.29.7-tctl-1.18.4-cli-1.7.2
+  nginx: nginx:1.30.5-alpine
+  curl: curlimages/curl:8.22.0
+  busybox: busybox:1.38.0
+
+storageClass: ""   # empty = cluster default
+
+clickhouse:
+  mode: oss        # oss | cloud
+  database: clickshop
+  # cloud mode only (password lives in the Secret, key clickhouse-password)
+  host: ""
+  port: 8443
+  user: default
+  consoleUrl: ""   # optional link shown on the home page
+  persistence: 50Gi
+  resources:
+    requests: { cpu: "1", memory: 4Gi }
+    limits: { memory: 8Gi }
+
+postgres:
+  mode: oss        # oss | cloud
+  # cloud mode only: the connection string lives in the Secret (postgres-url).
+  consoleUrl: ""
+  persistence: 20Gi
+  resources:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { memory: 2Gi }
+
+cdc:
+  mode: peerdb     # peerdb | clickpipes | none
+  # clickpipes: link to the ClickPipes page of your service (shown in the UI)
+  clickpipesUrl: ""
+  # peerdb with postgres.mode=cloud: source connection (password in the
+  # Secret, key postgres-source-password). Ignored when postgres.mode=oss.
+  source:
+    host: ""
+    port: 5432
+    user: ""
+    database: ""
+  # PeerDB stages batches in S3 and ClickHouse reads them back. The in-cluster
+  # MinIO only works with an in-cluster ClickHouse. With ClickHouse Cloud use
+  # type s3: a real bucket, credentials from the pod identity (EKS IRSA or Pod
+  # Identity on serviceAccount), never static keys.
+  staging:
+    type: minio      # minio | s3
+    bucket: ""
+    region: ""
+    serviceAccount: ""
+
+langfuse:
+  mode: oss        # oss | cloud | none
+  # cloud mode only (keys live in the Secret: langfuse-public-key / langfuse-secret-key)
+  baseUrl: ""
+  environment: default
+  resources:
+    requests: { cpu: 250m, memory: 768Mi }
+    limits: { memory: 2Gi }
+
+clickstack:
+  mode: oss        # oss | cloud | none
+  # cloud mode only: OTLP endpoint of Managed ClickStack (key in the Secret: clickstack-api-key)
+  otlpEndpoint: ""
+  uiUrl: ""
+
+llm:
+  # anthropic when the Secret has anthropic-api-key, otherwise openai-compatible
+  provider: auto   # auto | anthropic | openai-compatible
+  anthropicModel: claude-sonnet-5
+  # openai-compatible endpoint; defaults to the bundled Ollama
+  openaiBaseUrl: ""
+  openaiModel: qwen2.5:7b
+  label: ""
+  # set by install.sh when the Secret contains anthropic-api-key
+  hasAnthropicKey: false
+
+ollama:
+  enabled: auto    # auto (only without Anthropic key) | true | false
+  model: qwen2.5:7b
+  contextLength: 16384
+  persistence: 30Gi
+  # Lands on a node labelled workload=llm when there is one (tainted
+  # workload=llm:NoSchedule in deploy/eks/cluster.yaml), anywhere otherwise.
+  nodeSelector: {}
+  tolerations:
+    - { key: workload, operator: Equal, value: llm, effect: NoSchedule }
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 100
+          preference:
+            matchExpressions:
+              - { key: workload, operator: In, values: [llm] }
+  resources:
+    requests: { cpu: "6", memory: 10Gi }
+    limits: { memory: 14Gi }
+
+data:
+  days: 30
+  pageEvents: 2000000
+  feedbackRows: 1000000
+  customers: 20000
+  orders: 100000
+
+traffic:
+  enabled: true
+  intervalSeconds: 20
+  otelIntervalSeconds: 30
+
+gateway:
+  enabled: true
+  # REQUIRED: CIDRs allowed to reach the demo. Never 0.0.0.0/0.
+  sourceRanges: []
+  serviceType: LoadBalancer
+  # Agent runs on a CPU model can exceed the default 60 s idle timeout of
+  # cloud load balancers (AWS ELB here; other clouds ignore the key).
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-connection-idle-timeout: "600"
+  ports:
+    app: 80
+    langfuse: 8081
+    hyperdx: 8082
+    peerdb: 8083
+
+# Optional host-based Ingress (instead of, or in addition to, the gateway).
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    app: ""
+    langfuse: ""
+    hyperdx: ""
+  tls: []
+
+resources:
+  web:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { memory: 1536Mi }
+  librechat:
+    requests: { cpu: 250m, memory: 768Mi }
+    limits: { memory: 2Gi }
+  mongo:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+  valkey:
+    requests: { cpu: 50m, memory: 64Mi }
+    limits: { memory: 512Mi }
+  minio:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+  hyperdx:
+    requests: { cpu: 250m, memory: 768Mi }
+    limits: { memory: 2Gi }
+  otelCollector:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+  peerdb:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { memory: 1Gi }
+  temporal:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits: { memory: 1Gi }

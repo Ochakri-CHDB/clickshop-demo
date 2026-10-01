@@ -1,0 +1,146 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: init-sql
+  labels: {{- include "cs.labels" . | nindent 4 }}
+data:
+{{- range $path, $_ := .Files.Glob "files/clickhouse/*.sql" }}
+  ch-{{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- range $path, $_ := .Files.Glob "files/postgres/*.sql" }}
+  pg-{{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+{{- range $path, $_ := .Files.Glob "files/scripts/*.sh" }}
+  {{ base $path }}: |
+{{ $.Files.Get $path | indent 4 }}
+{{- end }}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: clickshop-init-{{ .Release.Revision }}
+  labels: {{- include "cs.labels" . | nindent 4 }}
+    app.kubernetes.io/component: init
+spec:
+  backoffLimit: 6
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels: {{- include "cs.selector" "clickshop-init" | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      volumes:
+        - name: sql
+          configMap:
+            name: init-sql
+            items:
+              {{- range $path, $_ := .Files.Glob "files/clickhouse/*.sql" }}
+              - { key: ch-{{ base $path }}, path: ch/{{ base $path }} }
+              {{- end }}
+              {{- range $path, $_ := .Files.Glob "files/postgres/*.sql" }}
+              - { key: pg-{{ base $path }}, path: pg/{{ base $path }} }
+              {{- end }}
+              {{- range $path, $_ := .Files.Glob "files/scripts/*.sh" }}
+              - { key: {{ base $path }}, path: scripts/{{ base $path }}, mode: 0755 }
+              {{- end }}
+      initContainers:
+        - name: postgres-schema
+          image: {{ .Values.images.postgres }}
+          command: ["sh", "/init/scripts/pg-init.sh"]
+          env:
+            - name: POSTGRES_URL
+              {{- include "cs.secretRef" (dict "root" . "key" "postgres-url") | nindent 14 }}
+            - { name: DATA_CUSTOMERS, value: {{ .Values.data.customers | quote }} }
+            - { name: DATA_ORDERS, value: {{ .Values.data.orders | quote }} }
+            - { name: DATA_DAYS, value: {{ .Values.data.days | quote }} }
+          volumeMounts:
+            - { name: sql, mountPath: /init }
+            - { name: sql, mountPath: /sql, subPath: pg }
+        - name: clickhouse-schema
+          image: {{ .Values.images.clickhouse }}
+          command: ["sh", "/init/scripts/ch-init.sh", "schema"]
+          env: &chenv
+            - { name: CH_HOST, value: {{ include "cs.chHost" . | quote }} }
+            - { name: CH_PORT, value: {{ include "cs.chNativePort" . | quote }} }
+            - { name: CH_SECURE, value: {{ include "cs.chSecure" . | quote }} }
+            - { name: CH_USER, value: {{ include "cs.chUser" . | quote }} }
+            - name: CH_PASSWORD
+              {{- include "cs.secretRef" (dict "root" . "key" "clickhouse-password") | nindent 14 }}
+            - { name: CH_DB, value: {{ .Values.clickhouse.database | quote }} }
+            - { name: CH_EXTRA_DBS, value: {{ ternary "langfuse" "" (eq .Values.langfuse.mode "oss") | quote }} }
+            - { name: DATA_DAYS, value: {{ .Values.data.days | quote }} }
+            - { name: DATA_PAGE_EVENTS, value: {{ .Values.data.pageEvents | quote }} }
+            - { name: DATA_FEEDBACK_ROWS, value: {{ .Values.data.feedbackRows | quote }} }
+          volumeMounts:
+            - { name: sql, mountPath: /init }
+            - { name: sql, mountPath: /sql, subPath: ch }
+        {{- if eq .Values.cdc.mode "peerdb" }}
+        - name: temporal-search-attribute
+          image: {{ .Values.images.temporalAdmin }}
+          command:
+            - sh
+            - -c
+            - |
+              until temporal operator namespace describe default --address temporal:7233 >/dev/null 2>&1; do echo waiting for temporal; sleep 5; done
+              temporal operator search-attribute create --name MirrorName --type Text --namespace default --address temporal:7233 || true
+        - name: peerdb-mirror
+          image: {{ .Values.images.postgres }}
+          command: ["sh", "/init/scripts/peerdb-mirror.sh"]
+          env:
+            - name: PEERDB_PASSWORD
+              {{- include "cs.secretRef" (dict "root" . "key" "demo-password") | nindent 14 }}
+            - name: PG_PASSWORD_CATALOG
+              {{- include "cs.secretRef" (dict "root" . "key" "postgres-password") | nindent 14 }}
+            - name: PEERDB_CATALOG_URL
+              value: postgresql://postgres:$(PG_PASSWORD_CATALOG)@postgres:5432/peerdb
+            - { name: PG_HOST, value: {{ .Values.cdc.source.host | default "postgres" | quote }} }
+            - { name: PG_PORT, value: {{ .Values.cdc.source.port | default 5432 | quote }} }
+            - { name: PG_USER, value: {{ .Values.cdc.source.user | default "postgres" | quote }} }
+            - name: PG_PASSWORD
+              {{- include "cs.secretRef" (dict "root" . "key" (ternary "postgres-password" "postgres-source-password" (eq .Values.postgres.mode "oss"))) | nindent 14 }}
+            - { name: PG_DB, value: {{ .Values.cdc.source.database | default "clickshop" | quote }} }
+            - { name: CH_HOST, value: {{ include "cs.chHost" . | quote }} }
+            - { name: CH_NATIVE_PORT, value: {{ include "cs.chNativePort" . | quote }} }
+            - { name: CH_USER, value: {{ include "cs.chUser" . | quote }} }
+            - name: CH_PASSWORD
+              {{- include "cs.secretRef" (dict "root" . "key" "clickhouse-password") | nindent 14 }}
+            - { name: CH_DB, value: {{ .Values.clickhouse.database | quote }} }
+            - { name: CH_DISABLE_TLS, value: {{ ternary "false" "true" (eq (include "cs.chSecure" .) "true") | quote }} }
+          volumeMounts:
+            - { name: sql, mountPath: /init }
+        {{- end }}
+        {{- if ne .Values.cdc.mode "none" }}
+        - name: clickhouse-mvs
+          image: {{ .Values.images.clickhouse }}
+          command: ["sh", "/init/scripts/ch-init.sh", "mvs"]
+          env: *chenv
+          volumeMounts:
+            - { name: sql, mountPath: /init }
+            - { name: sql, mountPath: /sql, subPath: ch }
+        {{- end }}
+      containers:
+        - name: seed-accounts
+          image: {{ include "cs.image" (dict "root" . "name" "librechat") }}
+          command: ["sh", "-c", "node /app/seed-users.cjs && node /app/seed-langfuse.mjs && node /app/seed-hyperdx.mjs"]
+          env:
+            - { name: MONGO_URI, value: "mongodb://mongodb:27017/LibreChat" }
+            - { name: DEMO_EMAIL_DOMAIN, value: {{ .Values.demoEmailDomain | quote }} }
+            - { name: ADMIN_EMAIL, value: {{ include "cs.adminEmail" . | quote }} }
+            - name: DEMO_PASSWORD
+              {{- include "cs.secretRef" (dict "root" . "key" "demo-password") | nindent 14 }}
+            {{- if ne .Values.langfuse.mode "none" }}
+            - { name: LANGFUSE_BASE_URL, value: {{ include "cs.langfuseBaseUrl" . | quote }} }
+            - name: LANGFUSE_PUBLIC_KEY
+              {{- include "cs.secretRef" (dict "root" . "key" "langfuse-public-key") | nindent 14 }}
+            - name: LANGFUSE_SECRET_KEY
+              {{- include "cs.secretRef" (dict "root" . "key" "langfuse-secret-key") | nindent 14 }}
+            {{- end }}
+            {{- if eq .Values.clickstack.mode "oss" }}
+            - { name: HYPERDX_API_URL, value: "http://hyperdx:8000" }
+            - { name: HYPERDX_ADMIN_EMAIL, value: {{ include "cs.adminEmail" . | quote }} }
+            {{- end }}
+          resources:
+            requests: { cpu: 50m, memory: 128Mi }
+            limits: { memory: 512Mi }

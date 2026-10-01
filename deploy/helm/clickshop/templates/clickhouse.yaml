@@ -1,0 +1,112 @@
+{{- if eq .Values.clickhouse.mode "oss" }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-config
+  labels: {{- include "cs.labels" . | nindent 4 }}
+data:
+  clickshop.xml: |
+    <clickhouse>
+      <logger><level>warning</level><console>1</console></logger>
+      <listen_host>0.0.0.0</listen_host>
+      <max_server_memory_usage_to_ram_ratio>0.85</max_server_memory_usage_to_ram_ratio>
+      <mark_cache_size>268435456</mark_cache_size>
+      <!-- Keep system log tables small on a demo box. -->
+      <query_log><ttl>event_date + INTERVAL 3 DAY DELETE</ttl></query_log>
+      <trace_log remove="1"/>
+      <text_log remove="1"/>
+      <metric_log remove="1"/>
+      <asynchronous_metric_log remove="1"/>
+      <part_log remove="1"/>
+      <latency_log remove="1"/>
+      <processors_profile_log remove="1"/>
+    </clickhouse>
+  users.xml: |
+    <clickhouse>
+      <profiles>
+        <default>
+          <max_threads>4</max_threads>
+        </default>
+      </profiles>
+      <users>
+        <default>
+          <password from_env="CLICKHOUSE_PASSWORD"/>
+          <networks><ip>::/0</ip></networks>
+          <access_management>1</access_management>
+          <named_collection_control>1</named_collection_control>
+        </default>
+      </users>
+    </clickhouse>
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: clickhouse-initdb
+  labels: {{- include "cs.labels" . | nindent 4 }}
+data:
+  00-databases.sql: |
+    CREATE DATABASE IF NOT EXISTS {{ .Values.clickhouse.database }};
+    CREATE DATABASE IF NOT EXISTS langfuse;
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: clickhouse
+  labels: {{- include "cs.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "cs.selector" "clickhouse" | nindent 4 }}
+  ports:
+    - { name: http, port: 8123, targetPort: 8123 }
+    - { name: native, port: 9000, targetPort: 9000 }
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: clickhouse
+  labels: {{- include "cs.labels" . | nindent 4 }}
+spec:
+  serviceName: clickhouse
+  replicas: 1
+  selector:
+    matchLabels: {{- include "cs.selector" "clickhouse" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "cs.selector" "clickhouse" | nindent 8 }}
+    spec:
+      containers:
+        - name: clickhouse
+          image: {{ .Values.images.clickhouse }}
+          imagePullPolicy: {{ .Values.imagePullPolicy }}
+          env:
+            - name: CLICKHOUSE_PASSWORD
+              {{- include "cs.secretRef" (dict "root" . "key" "clickhouse-password") | nindent 14 }}
+            - name: CLICKHOUSE_SKIP_USER_SETUP
+              value: "1"
+          ports:
+            - { containerPort: 8123, name: http }
+            - { containerPort: 9000, name: native }
+          readinessProbe:
+            httpGet: { path: /ping, port: 8123 }
+            periodSeconds: 5
+          resources: {{- toYaml .Values.clickhouse.resources | nindent 12 }}
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/clickhouse }
+            - { name: config, mountPath: /etc/clickhouse-server/config.d/clickshop.xml, subPath: clickshop.xml }
+            - { name: config, mountPath: /etc/clickhouse-server/users.d/clickshop.xml, subPath: users.xml }
+            - { name: initdb, mountPath: /docker-entrypoint-initdb.d }
+      volumes:
+        - name: config
+          configMap: { name: clickhouse-config }
+        - name: initdb
+          configMap: { name: clickhouse-initdb }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- include "cs.storageClass" . | nindent 8 }}
+        resources:
+          requests:
+            storage: {{ .Values.clickhouse.persistence }}
+{{- end }}

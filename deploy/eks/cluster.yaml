@@ -1,0 +1,37 @@
+# Demo cluster for ClickShop on EKS: eksctl create cluster -f deploy/eks/cluster.yaml
+# About 2 USD/hour with the LLM node, 1 USD/hour without it (eu-central-1).
+# Every node group and volume lives in one zone, so scaling to 0 overnight
+# never strands a volume (see "Scale to zero and restart" in the README).
+# Drop the llm node group if you install with an Anthropic key.
+apiVersion: eksctl.io/v1alpha5
+kind: ClusterConfig
+metadata:
+  name: clickshop-demo
+  region: eu-central-1
+availabilityZones: [eu-central-1a, eu-central-1b]
+addons:
+  - name: aws-ebs-csi-driver
+    useDefaultPodIdentityAssociations: true
+  - name: eks-pod-identity-agent
+managedNodeGroups:
+  - name: general
+    instanceType: m6i.2xlarge
+    availabilityZones: [eu-central-1a]
+    desiredCapacity: 2
+    minSize: 0
+    maxSize: 2
+    volumeSize: 80
+    volumeType: gp3
+  - name: llm
+    instanceType: c7i.4xlarge
+    availabilityZones: [eu-central-1a]
+    desiredCapacity: 1
+    minSize: 0
+    maxSize: 1
+    volumeSize: 80
+    volumeType: gp3
+    labels: { workload: llm }
+    taints:
+      - key: workload
+        value: llm
+        effect: NoSchedule

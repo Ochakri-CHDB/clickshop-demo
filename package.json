@@ -1,0 +1,34 @@
+{
+  "name": "clickshop",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace=apps/web",
+    "build": "npm run build --workspace=apps/web",
+    "lint": "eslint . --ext .ts,.tsx",
+    "format": "prettier --write .",
+    "healthcheck": "npx tsx scripts/healthcheck.ts",
+    "bootstrap": "npx tsx scripts/bootstrap.ts",
+    "docker:up": "docker compose up -d",
+    "docker:down": "docker compose down",
+    "seed:postgres": "npx tsx scripts/seed-postgres.ts",
+    "seed:clickhouse": "npx tsx scripts/seed-clickhouse.ts",
+    "seed:feedback": "npx tsx scripts/seed-feedback-search.ts",
+    "cdc:check": "npx tsx scripts/cdc/cdc-check.ts",
+    "cdc:report": "npx tsx scripts/cdc/cdc-readiness-report.ts",
+    "cdc:checklist": "npx tsx scripts/cdc/generate-cdc-checklist.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@typescript-eslint/eslint-plugin": "^8.57.1",
+    "@typescript-eslint/parser": "^8.57.1",
+    "eslint": "^8.56.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.2.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0"
+  }
+}

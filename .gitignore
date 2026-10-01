@@ -1,0 +1,27 @@
+node_modules/
+.next/
+dist/
+build/
+.env
+.env.local
+.env.*.local
+.env.vercel
+*.log
+.DS_Store
+coverage/
+.turbo/
+out/
+*.tsbuildinfo
+.vercel
+
+# Draw.io backups
+docs/.$*.bkp
+
+# Generated test PDFs
+docs/test-contracts/*.pdf
+
+# IDE local MCP config (may contain credentials)
+.cursor/mcp.json
+
+values.local.yaml
+*.local.yaml

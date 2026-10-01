@@ -1,0 +1,44 @@
+{{- if .Values.traffic.enabled }}
+# Keeps the demo alive: new orders in Postgres (CDC), clickstream events in
+# ClickHouse, and synthetic telemetry for ClickStack.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: traffic-generator
+  labels: {{- include "cs.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "cs.selector" "traffic-generator" | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "cs.selector" "traffic-generator" | nindent 8 }}
+    spec:
+      containers:
+        - name: traffic
+          image: {{ .Values.images.curl }}
+          command:
+            - sh
+            - -c
+            - |
+              i=0
+              until curl -sf -o /dev/null http://web:4242/api/public-config; do echo "waiting for web"; sleep 5; done
+              while true; do
+                curl -s -o /dev/null -w "generate %{http_code}\n" -X POST http://web:4242/api/generate \
+                  -H "Content-Type: application/json" -H "x-internal-token: $INTERNAL_API_TOKEN" \
+                  -d '{"action":"batch","target":"both"}' --max-time 60
+                if [ $((i % {{ max 1 (div .Values.traffic.otelIntervalSeconds .Values.traffic.intervalSeconds) }})) -eq 0 ]; then
+                  curl -s -o /dev/null -w "otel %{http_code}\n" -X POST http://web:4242/api/otel/test \
+                    -H "Content-Type: application/json" -H "x-internal-token: $INTERNAL_API_TOKEN" \
+                    -d '{"action":"batch"}' --max-time 60
+                fi
+                i=$((i + 1))
+                sleep {{ .Values.traffic.intervalSeconds }}
+              done
+          env:
+            - name: INTERNAL_API_TOKEN
+              {{- include "cs.secretRef" (dict "root" . "key" "internal-token") | nindent 14 }}
+          resources:
+            requests: { cpu: 10m, memory: 16Mi }
+            limits: { memory: 64Mi }
+{{- end }}

@@ -1,0 +1,60 @@
+{
+  "_comment": "Alert definitions for the ClickShop ClickStack instance. The ClickStack alerts API (POST /api/v2/alerts on OSS, or POST https://api.clickhouse.cloud/v1/organizations/<ORG_ID>/services/<SERVICE_ID>/clickstack/alerts on Managed ClickStack) requires the dashboardId and tileId assigned at import time, plus a webhook channel. Fill in the placeholders after importing the dashboards, or create the alerts in the UI (tile menu > Create alert) with the values below.",
+  "alerts": [
+    {
+      "name": "ClickShop API p95 latency > 2s",
+      "message": "p95 latency of clickshop-api server spans exceeded 2000 ms over the last 5 minutes. Check the API Health dashboard: slowest routes table and recent error spans.",
+      "dashboard": "ClickShop - API Health",
+      "tile": "api-p95-number",
+      "source": "tile",
+      "interval": "5m",
+      "thresholdType": "above",
+      "threshold": 2000,
+      "channel": { "type": "webhook", "webhookId": "<WEBHOOK_ID>" }
+    },
+    {
+      "name": "ClickShop API error spike",
+      "message": "More than 25 error spans on clickshop-api in the last 5 minutes (roughly > 5% error rate at current traffic). Triage with the Recent error spans tile.",
+      "dashboard": "ClickShop - API Health",
+      "tile": "api-error-count",
+      "source": "tile",
+      "interval": "5m",
+      "thresholdType": "above",
+      "threshold": 25,
+      "channel": { "type": "webhook", "webhookId": "<WEBHOOK_ID>" }
+    },
+    {
+      "name": "ClickShop telemetry ingestion stopped",
+      "message": "Log ingestion dropped below 1 record in the last 15 minutes. The OTel collector on EC2 or the OTLP export to ClickStack is likely down.",
+      "dashboard": "ClickShop - Platform & Business Flow",
+      "tile": "plat-log-volume-number",
+      "source": "tile",
+      "interval": "15m",
+      "thresholdType": "below",
+      "threshold": 1,
+      "channel": { "type": "webhook", "webhookId": "<WEBHOOK_ID>" }
+    },
+    {
+      "name": "ClickShop payment webhooks stalled",
+      "message": "No 'Payment webhook received' event in the last hour. The business flow may be interrupted (payments simulator, web app, or ingestion).",
+      "dashboard": "ClickShop - Platform & Business Flow",
+      "tile": "plat-payment-webhooks",
+      "source": "tile",
+      "interval": "1h",
+      "thresholdType": "below",
+      "threshold": 1,
+      "channel": { "type": "webhook", "webhookId": "<WEBHOOK_ID>" }
+    },
+    {
+      "name": "ClickShop AI agent pipeline errors",
+      "message": "More than 10 error spans on clickshop-librechat in the last 15 minutes. LLM calls, MCP tools, or the RAG pipeline are failing.",
+      "dashboard": "ClickShop - AI Agents",
+      "tile": "agents-pipeline-errors",
+      "source": "tile",
+      "interval": "15m",
+      "thresholdType": "above",
+      "threshold": 10,
+      "channel": { "type": "webhook", "webhookId": "<WEBHOOK_ID>" }
+    }
+  ]
+}

@@ -1,0 +1,118 @@
+# Publishes a release from a tag vX.Y.Z (must match appVersion in Chart.yaml):
+#   ghcr.io/<owner>/clickshop-web:X.Y.Z        (linux/amd64, linux/arm64)
+#   ghcr.io/<owner>/clickshop-librechat:X.Y.Z  (linux/amd64, linux/arm64)
+#   oci://ghcr.io/<owner>/charts/clickshop     (chart version X.Y.Z)
+# The packaged chart points at the images of the repository owner, so a fork
+# publishes a self-contained release under its own namespace.
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      owner: ${{ steps.v.outputs.owner }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: v
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          app=$(sed -nE 's/^appVersion: *"?([^"]+)"?.*/\1/p' deploy/helm/clickshop/Chart.yaml)
+          if [ "$version" != "$app" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match appVersion $app in deploy/helm/clickshop/Chart.yaml"
+            exit 1
+          fi
+          script=$(sed -nE 's/^CLICKSHOP_VERSION=\$\{CLICKSHOP_VERSION:-([^}]+)\}.*/\1/p' install.sh)
+          if [ "$version" != "$script" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match CLICKSHOP_VERSION $script in install.sh"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+
+  images:
+    needs: version
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: web
+            context: .
+            file: apps/web/Dockerfile
+          - name: librechat
+            context: infra/librechat
+            file: infra/librechat/Dockerfile
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/setup-qemu-action@v4
+      - uses: docker/setup-buildx-action@v4
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          provenance: false
+          tags: |
+            ghcr.io/${{ needs.version.outputs.owner }}/clickshop-${{ matrix.name }}:${{ needs.version.outputs.version }}
+            ghcr.io/${{ needs.version.outputs.owner }}/clickshop-${{ matrix.name }}:latest
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ needs.version.outputs.version }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  chart:
+    needs: [version, images]
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      OWNER: ${{ needs.version.outputs.owner }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+        with:
+          version: v4.3.0
+      - name: Point the chart at this repository's images
+        run: |
+          sed -i -E "s#^(  registry:).*#\1 ghcr.io/${OWNER}#" deploy/helm/clickshop/values.yaml
+          grep -n '^  registry:' deploy/helm/clickshop/values.yaml
+      - name: Lint
+        run: helm lint deploy/helm/clickshop --set gateway.sourceRanges[0]=203.0.113.10/32
+      - name: Package and push
+        run: |
+          helm package deploy/helm/clickshop --version "$VERSION" --app-version "$VERSION" -d dist
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm push "dist/clickshop-$VERSION.tgz" "oci://ghcr.io/$OWNER/charts"
+      - name: Check anonymous pull
+        run: |
+          for pkg in clickshop-web clickshop-librechat charts/clickshop; do
+            token=$(curl -fsS "https://ghcr.io/token?scope=repository:$OWNER/$pkg:pull" | jq -r .token)
+            code=$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $token" \
+              -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.oci.image.manifest.v1+json' \
+              "https://ghcr.io/v2/$OWNER/$pkg/manifests/$VERSION")
+            if [ "$code" = 200 ]; then
+              echo "$pkg: public"
+            else
+              echo "::warning::ghcr.io/$OWNER/$pkg is not public (HTTP $code). Open Packages > $pkg > Package settings > Change visibility > Public, once per package."
+            fi
+          done
