@@ -349,7 +349,7 @@ Compare the ANSWER with the EXPECTED answer and the retrieved CONTEXT. Respond w
     const result = await dataset.runExperiment({
       name: externalDataset ? `rag-baseline-${datasetName}` : "rag-chunk-optimization",
       runName,
-      description: `ClickShop data-quality RAG pipeline (EMBEDDING > RETRIEVER > GENERATION) with topK=${k} retrieved chunks, judged by ${process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5"}.`,
+      description: `ClickShop data-quality RAG pipeline (EMBEDDING > RETRIEVER > GENERATION) with topK=${k} retrieved chunks, judged by ${process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5-5"}.`,
       task: makeTask(k),
       evaluators: [llmJudgeEvaluator, efficiencyEvaluator],
       runEvaluators: makeRunEvaluators(),

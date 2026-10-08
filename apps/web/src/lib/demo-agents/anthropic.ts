@@ -24,7 +24,7 @@ export type { LlmToolDef as AnthropicToolDef, LlmMessage as AnthropicMessage, Ll
 /** LangChain / LangGraph chat model. */
 export function langchainChatModel(maxTokens: number): BaseChatModel {
   if (LLM_PROVIDER === "anthropic") {
-    // No temperature: claude-sonnet-5 only accepts the default.
+    // No temperature: claude-sonnet-5-5 only accepts the default.
     return new ChatAnthropic({
       model: LLM_MODEL,
       apiKey: process.env.ANTHROPIC_API_KEY,

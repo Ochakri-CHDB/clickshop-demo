@@ -133,7 +133,7 @@ export async function runToolsAgentAiSdk(
         prompt,
         tools,
         stopWhen: stepCountIs(6),
-        // claude-sonnet-5 spends part of the output budget on thinking tokens;
+        // claude-sonnet-5-5 spends part of the output budget on thinking tokens;
         // 1024 gets truncated before the final answer.
         maxOutputTokens: 4096,
       });

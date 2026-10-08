@@ -12,7 +12,7 @@
 # in the Kubernetes Secret "clickshop-secrets" and reused on re-runs.
 set -euo pipefail
 
-CLICKSHOP_VERSION=${CLICKSHOP_VERSION:-1.0.0}
+CLICKSHOP_VERSION=${CLICKSHOP_VERSION:-1.0.1}
 CLICKSHOP_REPO=${CLICKSHOP_REPO:-Ochakri-CHDB/clickshop-demo}
 
 log() { printf '\033[1;33m==>\033[0m %s\n' "$*"; }
@@ -158,7 +158,7 @@ fi
 # --- LLM --------------------------------------------------------------------
 ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
 ask ANTHROPIC_API_KEY "Anthropic API key (empty = local Qwen 2.5 7B via Ollama)" "" secret
-ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-5}
+ANTHROPIC_MODEL=${ANTHROPIC_MODEL:-claude-sonnet-5-5}
 CLICKSHOP_KEEP_OLLAMA=${CLICKSHOP_KEEP_OLLAMA:-auto}
 
 # --- Network exposure -------------------------------------------------------

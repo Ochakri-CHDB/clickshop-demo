@@ -20,7 +20,7 @@ const LF_MODE = env.MODE_LANGFUSE || "oss";
 const PROVIDER = env.LLM_PROVIDER || (env.ANTHROPIC_API_KEY ? "anthropic" : "openai-compatible");
 const MODEL =
   env.LLM_MODEL ||
-  (PROVIDER === "anthropic" ? env.ANTHROPIC_MODEL || "claude-sonnet-5" : env.OPENAI_MODEL || "qwen2.5:7b");
+  (PROVIDER === "anthropic" ? env.ANTHROPIC_MODEL || "claude-sonnet-5-5" : env.OPENAI_MODEL || "qwen2.5:7b");
 const OPENAI_BASE_URL = (env.OPENAI_BASE_URL || "http://ollama:11434/v1").replace(/\/$/, "");
 const SMALL_MODEL = PROVIDER !== "anthropic" && env.LLM_SMALL_MODEL !== "false";
 const ENDPOINT = PROVIDER === "anthropic" ? "anthropic" : "Ollama";

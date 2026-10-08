@@ -346,7 +346,7 @@ export async function runLangfuseDemoEval(): Promise<RunLangfuseDemoEvalResult> 
               "clickshop.demo.generation",
               async (genObs) => {
                 safeUpdate(genObs, {
-                  model: "claude-sonnet-5",
+                  model: "claude-sonnet-5-5",
                   input: [{ role: "user", content: question }],
                   output: outputText,
                   usageDetails: { input: 120, output: 65 },

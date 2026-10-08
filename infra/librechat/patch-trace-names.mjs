@@ -3,12 +3,12 @@
  *
  * Problem: @librechat/agents names traces "LibreChat Agent: <agentName>",
  * and for modelSpec presets (ephemeral agents) agentName is the encoded id
- * "anthropic__claude-sonnet-5___AI Engineer Agent", which is unreadable in
+ * "anthropic__claude-sonnet-5-5___AI Engineer Agent", which is unreadable in
  * the Langfuse trace list.
  *
  * This script rewrites getLangfuseTraceName in the compiled CJS bundle to
  * emit "librechat.<slug>" instead:
- *   - "anthropic__claude-sonnet-5___AI Engineer Agent" -> librechat.ai-engineer-agent
+ *   - "anthropic__claude-sonnet-5-5___AI Engineer Agent" -> librechat.ai-engineer-agent
  *   - "ClickShop CEO Agent" (MongoDB agents)            -> librechat.ceo-agent
  *   - no agent name                                     -> librechat.chat
  */
