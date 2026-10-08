@@ -117,7 +117,7 @@ Main variables:
 | `CLICKSHOP_PG_URL` | | Postgres URL in `cloud` mode |
 | `CLICKSHOP_LANGFUSE_BASE_URL`, `CLICKSHOP_LANGFUSE_PUBLIC_KEY`, `CLICKSHOP_LANGFUSE_SECRET_KEY`, `CLICKSHOP_LANGFUSE_ENV` | | Langfuse Cloud project and environment tag |
 | `CLICKSHOP_CLICKSTACK_OTLP`, `CLICKSHOP_CLICKSTACK_KEY`, `CLICKSHOP_CLICKSTACK_UI` | | Managed ClickStack |
-| `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | empty, `claude-sonnet-5` | Use Claude instead of the local model |
+| `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL` | empty, `claude-sonnet-5-5` | Use Claude instead of the local model |
 | `CLICKSHOP_KEEP_OLLAMA` | `auto` | `true` keeps Ollama running even with an Anthropic key |
 | `CLICKSHOP_SOURCE_RANGES` | your public IP /32 | CIDRs allowed on the load balancer |
 | `CLICKSHOP_ADMIN_EMAIL` | `admin@clickshop.io` | Local admin account |
@@ -218,15 +218,15 @@ kubectl delete ns clickshop   # also deletes the volumes
 A tag publishes everything through `.github/workflows/release.yml`: both images for `linux/amd64` and `linux/arm64` on `ghcr.io/<owner>/clickshop-web` and `clickshop-librechat`, and the chart on `oci://ghcr.io/<owner>/charts/clickshop`. A fork publishes under its own owner.
 
 1. Set the same version in `appVersion` and `version` of `deploy/helm/clickshop/Chart.yaml` and in `CLICKSHOP_VERSION` at the top of `install.sh`.
-2. Commit, then `git tag v1.0.0 && git push origin v1.0.0`. The workflow fails if the tag and `appVersion` differ.
+2. Commit, then `git tag v1.0.1 && git push origin v1.0.1`. The workflow fails if the tag and `appVersion` differ.
 3. First release only: GitHub creates the three packages as private. Make each one public (Packages, package, Package settings, Change visibility). The last step of the workflow warns until they are.
 
 To build the images yourself, for a private registry:
 
 ```bash
 REGISTRY=registry.example.com/clickshop
-docker buildx build --platform linux/amd64,linux/arm64 -f apps/web/Dockerfile -t $REGISTRY/clickshop-web:1.0.0 --push .
-docker buildx build --platform linux/amd64,linux/arm64 -t $REGISTRY/clickshop-librechat:1.0.0 --push infra/librechat
+docker buildx build --platform linux/amd64,linux/arm64 -f apps/web/Dockerfile -t $REGISTRY/clickshop-web:1.0.1 --push .
+docker buildx build --platform linux/amd64,linux/arm64 -t $REGISTRY/clickshop-librechat:1.0.1 --push infra/librechat
 CLICKSHOP_IMAGE_REGISTRY=$REGISTRY ./install.sh
 ```
 
@@ -240,3 +240,4 @@ CLICKSHOP_IMAGE_REGISTRY=$REGISTRY ./install.sh
 | `deploy/eks/cluster.yaml` | eksctl cluster sized for the full open source setup |
 | `install.sh` | Interactive and non-interactive installer, works from a checkout or piped from curl |
 | `.github/workflows` | CI (chart lint and render, shellcheck, typecheck) and release |
+| `AGENTS.md`, `CLAUDE.md` | Install, release and safety rules for coding agents (Cursor, Claude Code, Codex) |

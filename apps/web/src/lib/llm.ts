@@ -26,14 +26,14 @@ export const LLM_PROVIDER: LlmProvider = resolveProvider();
 export const LLM_MODEL: string =
   process.env.LLM_MODEL ||
   (LLM_PROVIDER === "anthropic"
-    ? process.env.ANTHROPIC_MODEL || "claude-sonnet-5"
+    ? process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5"
     : process.env.OPENAI_MODEL || "qwen2.5:7b");
 
 export const OPENAI_BASE_URL: string = (process.env.OPENAI_BASE_URL || "http://ollama:11434/v1").replace(/\/$/, "");
 export const OPENAI_API_KEY: string = process.env.LLM_OPENAI_API_KEY || process.env.OPENAI_API_KEY || "ollama";
 export const ANTHROPIC_BASE_URL: string = (process.env.ANTHROPIC_BASE_URL || "https://api.anthropic.com").replace(/\/$/, "");
 
-/** Human-readable label, e.g. "anthropic/claude-sonnet-5" or "openai-compatible/qwen2.5:7b". */
+/** Human-readable label, e.g. "anthropic/claude-sonnet-5-5" or "openai-compatible/qwen2.5:7b". */
 export const LLM_LABEL = `${LLM_PROVIDER}/${LLM_MODEL}`;
 
 /** Small local models need more output budget headroom and tighter prompts. */

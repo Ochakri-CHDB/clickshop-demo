@@ -111,7 +111,7 @@ clickstack:
 llm:
   # anthropic when the Secret has anthropic-api-key, otherwise openai-compatible
   provider: auto   # auto | anthropic | openai-compatible
-  anthropicModel: claude-sonnet-5
+  anthropicModel: claude-sonnet-5-5
   # openai-compatible endpoint; defaults to the bundled Ollama
   openaiBaseUrl: ""
   openaiModel: qwen2.5:7b

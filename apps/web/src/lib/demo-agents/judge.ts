@@ -90,7 +90,7 @@ export async function judgeAndScore(params: {
           ],
         },
         async (genObs) => {
-          // `temperature` is deprecated on claude-sonnet-5+ (400 invalid_request_error).
+          // `temperature` is deprecated on claude-sonnet-5-5+ (400 invalid_request_error).
           const out = await callClaude({
             system: JUDGE_SYSTEM,
             messages: [{ role: "user", content: userContent }],
